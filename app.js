@@ -1,30 +1,30 @@
 const express = require('express');
 const {buildSchema} = require('graphql');
 const graphqlHTTP = require('express-graphql');
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+
+//env config
+dotenv.config();
+
+//import todo model
+
+const Todo = require('./models/todo');
 
 //creating express app
 const app = express();
 
-//dummy todos array
-
-let todos = [
-    {id: "1", task: 'Todo task one', completed: false},
-    { id: "2", task: 'Todo task two', completed: false },
-    { id: "3", task: 'Todo task three', completed: false },
-    { id: "4", task: 'Todo task four', completed: false}
-]
-
 //graphql schema
-
 const schema = buildSchema(`
     type Query {
         todos(completed: Boolean!) : [Todo]!
         todo(id: ID!) : Todo!
+        allTodos : [Todo]!
     }
     type Mutation {
-        addTodo(id: ID!, task: String!) : Todo!,
+        addTodo(task: String!) : Todo!,
         updateTodo(id: ID!, completed: Boolean!) : Todo!,
-        deleteTodo(id: ID!) : [Todo]!
+        deleteTodo(id: ID!) : Todo!
     }
     type Todo {
         id: ID!,
@@ -35,34 +35,64 @@ const schema = buildSchema(`
 
 //API resolvers for endpoints
 const root = {
+
+    //find todos by completed criteria
     todos: (args) => {
-        return todos.filter(todo => todo.completed === args.completed);
-    },
-    todo: (args) => {
-        return todos.find(todo => todo.id === args.id);
-    },
-    addTodo: (args) => {
-        const newTodo = {
-            id: args.id,
-            task: args.task,
-            completed: false
-        };
-        todos.push(newTodo);
-        return newTodo;
-    },
-    updateTodo: (args) => {
-        todos.map(todo => {
-            if(todo.id === args.id){
-                todo.completed = args.completed;
-                return todo;
+        return Todo.find({completed: args.completed}).then(
+            todos => {
+                return todos;
             }
-            return todo;
+        ).catch(
+            err => {
+                throw err;
+            }
+        );
+    },
+    //find all todos
+    allTodos: () => {
+        return Todo.find({});
+    },
+    //find todo based on id
+    todo: (args) => {
+        return Todo.findById(args.id).then(todo => {
+            return {...todo._doc, id: todo.id}
+        }).catch(err =>{
+            console.log(err);
+            throw err;
+        });
+    },
+    //add new todo
+    addTodo: (args) => {
+        const newTodo = new Todo(
+            {
+                task: args.task,
+                completed: false
+            }
+        );
+        return newTodo.save().then(todo => {
+            return {...todo._doc, id: todo.id};
+        }).catch(err => {
+            console.log(err)
+            throw err;
+        });
+    },
+    // update todo
+    updateTodo: (args) => {
+        return Todo.findByIdAndUpdate(args.id, { completed: args.completed}, (err,todo) => {
+            if(err) {
+                throw err;
+            }
+            return {...todo._doc, id: todo.id};
         })
-        return todos.find(todo => todo.id === args.id);
     },
     deleteTodo: (args) => {
-        todos = todos.filter(todo => todo.id !== args.id);
-        return todos;
+       return Todo.findByIdAndRemove(args.id).then(
+           todo => {
+               return {...todo._doc, id: todo.id};
+           }
+       ).catch(err =>{
+           throw err;
+       });
     }
 }
 
@@ -72,9 +102,13 @@ app.use('/todos', graphqlHTTP({
     graphiql: true
 }))
 const port = 4001;
-
-app.listen(port, () => {
-
-    console.log('GraphQL server started on port '+port);
-
-})
+mongoose
+    .connect(`mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0-7czst.mongodb.net/${process.env.MONGO_DB}?retryWrites=true&w=majority`, { useNewUrlParser: true, useUnifiedTopology: true , useFindAndModify: false})
+    .then(() => {
+        console.log('Connected to the database');
+        //start the server only if connected to a DB
+        app.listen(port, () => {
+            console.log('GraphQL server started on port ' + port);
+        })
+    })
+    .catch(err => console.log(err));
